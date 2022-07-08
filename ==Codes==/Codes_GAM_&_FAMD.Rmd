@@ -1,0 +1,162 @@
+---
+title: "Machine Learning Project"
+output: html_notebook
+---
+
+Importing Packages : 
+--------------------
+```{r}
+library("FactoMineR")
+library("factoextra")
+library(mgcv) # library for GAM
+library(ggplot2) # for beautiful plots
+library(cdata) # data wrangling
+library(sigr) # AUC calculation
+library(xtable) # to save table in latex format
+```
+
+Importing Data : 
+---------------
+
+```{r}
+X_sm = read.csv('X_train_smote.csv')
+y_sm = read.csv('y_train_smote.csv')
+X_train = read.csv('x_no_smote.csv')
+Y_train = read.csv('y_no_smote.csv')
+X_test = read.csv('X_test.csv')
+Y_test = read.csv('Y_test.csv')
+x_sm_factor_analysis <- X_sm
+x_test_factor_analysis <-X_test
+```
+
+Factor Analysis of Mixed Data FAMD : 
+-----------------------------------
+
+
+## Data Preperation:
+
+The data type is as follows:
+
+```{r}
+str(x_sm_factor_analysis)
+```
+
+In order to apply FAMD on my data, the categorical variables that are in numeric form will be converted to string form
+
+```{r}
+categorical <- c('Household.income' , 'Home.Ownership','Household.in.urban.rural.area' , 
+                 'population.density' , 'Price.of.Gasoline.Affects.Travel'  ,
+                 'Travel.is.a.Financial.Burden' , 'Gender' , 'Educational.Attainment' ,
+                 'More.than.One.Job' , 'Job.Category' , 'Relationship' ,
+                 'Full.Time.or.Part.Time.Worker' , 'Level.of.Physical.Activity', 
+                 'Public.Transportation.or.Taxi' , 'Passenger.to.Friend.Family.Member.or.Rental.Car' ,
+                 'Bicycle.or.Walk' , 'Race.African' , 'Race.Asian' , 'Race.American.Indian' ,
+                 'Race.Native.Hawaiian' , 'Multiple.Response.Race' )
+                 
+x_sm_factor_analysis[categorical]  <- lapply(x_sm_factor_analysis[categorical] , as.character)
+x_test_factor_analysis[categorical]  <- lapply(x_test_factor_analysis[categorical] , as.character)
+```
+
+Now after conversion, the data type is as follows:
+
+```{r}
+str(x_sm_factor_analysis)
+```
+
+
+## Model Fitting and Analysing
+
+
+```{r}
+res.famd <- FAMD(x_sm_factor_analysis,  ncp = 70, sup.var = NULL, ind.sup = NULL, graph = FALSE)
+```
+
+The proportion of variance retained by the different dimentions is the following:
+
+```{r}
+eig.val <- get_eigenvalue(res.famd)
+eig.val
+```
+
+The scree plot is the following :
+
+```{r}
+fviz_screeplot(res.famd)
+```
+## Graph of Variable:
+
+```{r}
+var <- get_famd_var(res.famd)
+var
+```
+```{r}
+# Plot of variables
+fviz_famd_var(res.famd, repel = TRUE)
+# Contribution to the first dimension
+fviz_contrib(res.famd, "var", axes = 1)
+# Contribution to the second dimension
+fviz_contrib(res.famd, "var", axes = 2)
+```
+```{r}
+quanti.var <- get_famd_var(res.famd, "quanti.var")
+quanti.var 
+```
+
+
+```{r}
+fviz_famd_var(res.famd, "quanti.var", col.var = "contrib", 
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+
+Now I will save the components to excel so I can test their predictive performance in jupyter notebook.
+
+```{r}
+res_train <- FAMD(x_sm_factor_analysis,  ncp = 70, sup.var = NULL, ind.sup = NULL, graph = FALSE)
+res_test <-FAMD(x_test_factor_analysis,  ncp = 70, sup.var = NULL, ind.sup = NULL, graph = FALSE)
+x_famd_train <- data.frame(res_train$ind$coord)
+x_famd_test <-data.frame(res_test$ind$coord)
+```
+
+Now I'll save the results to excel file so I could evaluate their predictive performance
+```{r}
+
+write.csv(x_famd_train,'x_famd_train.csv',row.names = FALSE)
+write.csv(x_famd_test ,'x_famd_test.csv',row.names = FALSE)
+```
+
+
+Now I will apply some codes that transforms the eigenvalues results to latex table
+
+```{r}
+print(xtable(eig.val, type = "latex"), file = "eignvalue.tex")
+```
+
+# Logistic Gam Model : 
+
+```{r}
+
+train <- data.frame(y_sm,X_sm)
+
+# formula: “Outcome==1” is to binarize the response variable
+form_gam=as.formula(" AFV == 1~s(Household.income,k = 6) +Home.Ownership+s(Count.of.household.members,k = 5)+Household.in.urban.rural.area+s(population.density,k = 5)+s(Price.of.Gasoline.Affects.Travel,k = 4)+s(Travel.is.a.Financial.Burden,k = 4)+s(Age)+Gender+s(Educational.Attainment,k = 4)+More.than.One.Job+s(Job.Category,k = 4)+s(Count.of.Car.Share.Program.Usage,k = 6)+s(Trip.Time.to.Work.in.Minutes)+s(Best.estimate.of.annual.miles)+s(Count.of.household.vehicles,k = 4)+s(count.of.children.in.household,k = 3)+s(Relationship,k = 5)+Full.Time.or.Part.Time.Worker+s(Count.of.Walk.Trips)+s(Count.of.Bike.Trips)+s(Level.of.Physical.Activity,k = 3)+s(Count.of.adult.household.members,k = 3)+s(Public.Transportation.or.Taxi,k = 3)+s(Passenger.to.Friend.Family.Member.or.Rental.Car,k = 3)+s(Bicycle.or.Walk,k = 3)+Race.African+Race.Asian+Race.American.Indian+Race.Native.Hawaiian +Multiple.Response.Race ")
+gam_model=gam(form_gam,data=train,family = binomial(link="logit"))
+gam_model$converged # check if the algorithm converges
+summary(gam_model)
+```
+
+
+```{r}
+#plotting non linear components
+par(mfrow=c(1,3), mar=c(4.1, 4.1, 2.1, 2.1)) 
+plot(gam_model, shade=TRUE, shade.col="lightblue")
+
+```
+ Now I will save GAM model results to csv in order to evaluate the prediction in my jupyter file so I could have the same form of plot 
+```{r}
+prediction_gam <- predict(gam_model, newdata = X_test, type="response")
+prediction_dataframe = data.frame(prediction_gam)
+write.csv(prediction_dataframe,'prediction_gam.csv',row.names = FALSE)
+```
+
+  
